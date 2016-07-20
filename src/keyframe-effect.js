@@ -50,6 +50,7 @@
     keyframeEffect._isCurrent = effectTime._isCurrent;
     keyframeEffect._totalDuration = effectTime._totalDuration;
     keyframeEffect._id = id;
+    keyframeEffect._animation = null;
     return keyframeEffect;
   };
 
@@ -70,6 +71,7 @@
     nullEffect._hasSameTarget = function() {
       return false;
     };
+    nullEffect._animation = null;
     return nullEffect;
   };
 
