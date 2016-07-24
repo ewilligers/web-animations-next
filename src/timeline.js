@@ -25,7 +25,7 @@
 
   scope.AnimationTimeline = function() {
     this._animations = [];
-    this.currentTime = undefined;
+    this.currentTime = null;
   };
 
   scope.AnimationTimeline.prototype = {
@@ -63,6 +63,9 @@
         effect.remove();
       }
       return this._play(effect);
+    },
+    _isInactive: function() {
+      return this.currentTime === null;
     }
   };
 

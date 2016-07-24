@@ -18,6 +18,10 @@
     if (options && options.id) {
       id = options.id;
     }
-    return scope.timeline._play(scope.KeyframeEffect(this, effectInput, options, id));
+    var animation = new Animation(scope.KeyframeEffect(this, effectInput, options, id));
+    animation.timeline = scope.timeline;
+    animation.play(); // associate with timeline - timeline needs to know about animation.
+    return animation;
+    return ._play();
   };
 })(webAnimations1);

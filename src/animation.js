@@ -30,147 +30,174 @@
     this.timeStamp = Date.now();
   };
 
-  scope.Animation = function(effect) {
+  var pendingPromise = function(animation) {
+    this._animation = animation;
+    this._isResolved = false;
+    this._promise = new Promise(function(resolve, reject) {
+      wrapper._resolve = resolve;
+      wrapper._reject = reject;
+    });
+  }
+
+  pendingPromise.prototype = {
+    resolve : function() {
+      WEB_ANIMATIONS_TESTING && console.assert(!this._isResolved);
+      this._isResolved = true;
+      this._resolve(this._animation);
+    },
+    reject : function(error) {
+      WEB_ANIMATIONS_TESTING && console.assert(!this._isResolved);
+      this._isResolved = true;
+      this._reject(error);
+    }
+  }
+
+  var resolvedPromise = function(animation) {
+    this._animation = animation;
+    this._isResolved = true;
+    this._promise = Promise.resolve(animation));
+  }
+
+  scope.Animation = function(effect, timeline) {
+    // https://w3c.github.io/web-animations/#dom-animation-animation
+    // Step 1
+
+    // https://w3c.github.io/web-animations/#animations
+    this._effect = null;
+    this._timeline = null;
+    this._startTime = null;
+    this._holdTime = null;
+    this._sequenceNumber = shared.sequenceNumber++;
+
+    // 3.5.9 https://w3c.github.io/web-animations/#current-ready-promise
+    this._currentReadyPromise = resolvedPromise(this);
+
+    // 3.5.10 https://w3c.github.io/web-animations/#pending-play-task
+    this._pendingPlayTask = null;
+
+    // 3.5.11 https://w3c.github.io/web-animations/#pending-pause-task
+    this._pendingPauseTask = null;
+
+    // 3.5.13 https://w3c.github.io/web-animations/#the-current-finished-promise
+    this._currentFinishedPromise = pendingPromise(this);
+
+    // 3.5.14 https://w3c.github.io/web-animations/#previous-current-time
+    this._previousCurrentTime = null;
+
+    // 3.5.17 https://w3c.github.io/web-animations/#animation-playback-rate
+    this._playbackRate = 1;
+
+    // https://w3c.github.io/web-animations/#finish-notification-steps
+    this._finishNotificationSteps = null;
+
+    // https://w3c.github.io/web-animations/#the-animation-interface
+
     this.id = '';
     if (effect && effect._id) {
       this.id = effect._id;
     }
-    this._effect = effect;
-    this._timeline = null;
 
-    this._startTime = null;
-    this._holdTime = null;
-    this._playbackRate = 1;
+    /*
+             attribute EventHandler             onfinish;
+             attribute EventHandler             oncancel;
+    */
 
-    this._currentReadyPromise = Promise.resolve(null); // ???
+    // Step 2
+    if (timeline) {
+      this.timeline = timeline;
+    } else {
+      this.timeline = scope.timeline;
+    }
 
-    // https://w3c.github.io/web-animations/#previous-current-time
-    this._previousCurrentTime = null;
-
-
-    // https://w3c.github.io/web-animations/#the-current-finished-promise
-    this._currentFinishedPromise = new Promise();
-    // TBD: replaced with a new (pending) Promise object every time the animation leaves the finished play state.
-
-
-    this._sequenceNumber = shared.sequenceNumber++;
+    // Step 3
+    if (effect) {
+      this.effect = effect;
+    }
   };
 
   scope.Animation.prototype = {
+    get timeline() {
+      return this._timeline;
+    },
     set timeline(newTimeline) {
       // https://w3c.github.io/web-animations/#setting-the-timeline
+
+      // Step 1, 2
       if (newTimeline === this._timeline) {
         return;
       }
+
+      // Step 3
       this._timeline = newTimeline;
+
+      // Step 4
       if (this._startTime !== null) {
         this._holdTime = null;
       }
+
+      // Step 5
       this._updateFinishedState(false, false);
     },
-    _updateFinishedState: function(didSeek, synchronouslyNotify) {
-      // https://w3c.github.io/web-animations/#update-an-animations-finished-state
-      if (this._startTime !== null &&
-          this._pendingPlayTask === null &&
-          this._pendingPauseTask === null) {
-        if (this._animationPlaybackRate > 0 &&
-            this.currentTime !=== null &&
-            this.currentTime >= this._effect.end) {
-          if (didSeek) {
-            this._holdTime = this.currentTime;
-          } else {
-            if (this._previousCurrentTime === null) {
-              this._holdTime = this._effect.end;
-            } else {
-              this._holdTime = max(this._previousCurrentTime, this._effect.end);
-            }
-          }
-        } else if (this._animationPlaybackRate < 0 &&
-                   this.currentTime !== null &&
-                   this.currentTime <= 0) {
-          if (didSeek) {
-            this._holdTime = this.currentTime;
-          } else {
-            this._holdTime = 0;
-          }
-        } else if (this.currentTime !== null &&
-                   this._animationPlaybackRate !== 0 &&
-                   this._timeline !== null &&
-                   this._timeline.IsActive()) {
-          if (didSeek && this._holdTime !== null) {
-            this._startTime = this._timeline.currentTime - (this._holdTime / this._animationPlaybackRate);
-            this._holdTime = null;
-          }
-        }
-        this._previousCurrentTime = this.currentTime;
-        var currentFinishedState = false;
-        if (this._playState == FINISHED) {
-          currentFinishedState = true;
-        }
-        if (currentFinishedState &&
-          !this._currentFinishedPromise.IsResolved()) {
-          var finishNotificationSteps = function() {
-            if (this._animationPlayState !== FINISHED) {
-              return;
-            }
-            this._currentFinishedPromise.resolve(this);
-
-            // TBD: Queue a task to fire a finish event at animation.
-            // The task source for this task is the DOM manipulation task source.
-
-          } // NOTE: still need to capture this / animation
-
-          if (synchronouslyNotify) {
-            // cancel any queued microtask to run the finish notification steps for this animation
-
-            finishNotificationSteps();
-          } else {
-            // queue a microtask to run finishNotificationSteps
-            // unless there is already a microtask queued to run those steps for animation.
-          }
-        }
-        if (!currentFinishedState &&
-            this._currentFinishedPromise.IsResolved()) {
-          this._currentFinishedPromise = new Promise(); // new (pending) Promise object
-        }
-      }
+    get effect() {
+      return this._effect;
     },
     set effect(newEffect) {
       // https://w3c.github.io/web-animations/#setting-the-target-effect
+
+      // Step 1, 2
       if (newEffect === this._effect) {
         return;
       }
+
+      // Step 3
       if (newEffect === null && this._effect !== null) {
         this._resetPendingTasks();
       }
+
+      // Step 4
       if (this._pendingPauseTask !== null) {
-        // reschedule this._pendingPauseTask to run as soon as animation is ready
+        // TBD: reschedule this._pendingPauseTask to run as soon as animation is ready
+        // [task will receive a current time]
       }
+
+      // Step 5
       if (this._pendingPlayTask !== null) {
-        // reschedule this._pendingPlayTask to run as soon as animation is ready to play new effect
+        // TBD: reschedule this._pendingPlayTask to run as soon as animation is ready to play new effect
       }
-      if (newEffect !== null && newEffect._animation !== null) {
+
+      // Step 6
+      if (newEffect !== null &&
+          newEffect._animation !== null &&
+          newEffect._animation !== this) {
         newEffect._animation.effect = null;
       }
+
+      // Step 7
       this._effect = newEffect;
       newEffect._animation = this;
+
+      // Step 8
       this._updateFinishedState(false, false);
     },
     _resetPendingTasks: function() {
       // https://w3c.github.io/web-animations/#reset-an-animations-pending-tasks
 
+      // Step 1
       if (this._pendingPlayTask !== null) {
-        // cancel this._pendingPlayTask
+        this._pendingPlayTask = null;
       }
+
+      // Step 2
       if (this._pendingPauseTask !== null) {
-        // cancel this._pendingPauseTask
+        this._pendingPauseTask = null;
       }
 
-      // Reject animation’s current ready promise with a DOMException named "AbortError".
-      // If cancelable promises materialize, we should probably cancel here instead of rejecting.
+      // Step 3
+      // "If cancelable promises materialize, we should probably cancel here instead of rejecting."
+      this._currentReadyPromise.reject(new DOMException('', 'AbortError'));
 
-      // Let animation’s current ready promise be the result of creating a new resolved Promise object.
-      this._currentReadyPromise = Promise.resolve(null); // ??? what should we pass?
+      // Step 4
+      this._currentReadyPromise = resolvedPromise(this);
     },
     get currentTime() {
       // https://w3c.github.io/web-animations/#the-current-time-of-an-animation
@@ -178,7 +205,7 @@
         return this._holdTime;
       }
       if (this._timeline === null ||
-          this._timeline.isInactive() ||
+          this._timeline._isInactive() ||
           this._startTime === null) {
         return null;
       }
@@ -186,58 +213,82 @@
     },
     _silentlySetCurrentTime: function(seekTime) {
       // https://w3c.github.io/web-animations/#silently-set-the-current-time
+
+      // Step 1
       if (seekTime === null) {
         if (this._currentTime !== null) {
-          throw a TypeError.
+          throw new TypeError();
         }
         return;
       }
+
+      // Step 2
       if (this._holdTime !== null ||
           this._startTime === null ||
           this._timeline === null ||
-          this._timeline.isInactive() ||
+          this._timeline._isInactive() ||
           this._playbackRate === 0) {
         this._holdTime = seekTime;
       } else {
         this._startTime = this._timeline.currentTime - (seekTime / this._playbackRate);
       }
 
-      if (this._timeline === null || this._timeline.isInactive()) {
+      // Step 3
+      if (this._timeline === null || this._timeline._isInactive()) {
         this._startTime = null;
       }
-      this._assertInvariant();
+      this._assertNoActiveTimelineInvariant();
 
+      // Step 4
       this._previousCurrentTime = null;
     },
     set currentTime(seekTime) {
       // https://w3c.github.io/web-animations/#setting-the-current-time-of-an-animation
+
+      // Step 1
       _silentlySetCurrentTime(seekTime);
+
+      // Step 2
       if (this._pendingPauseTask) {
         this._holdTime = seekTime;
         this._startTime = null;
-        this._pendingPauseTask.cancel();
+        this._pendingPauseTask = null;
         this._currentReadyPromise().resolve(this);
       }
+
+      // Step 3
       this._updateFinishedState(true, false);
     },
-    _assertInvariant: function() {
-      if (this._timeline === null || this._timeline.isInactive()) {
-        assert(this._startTime === null || this._currentTime === null);
+    _assertNoActiveTimelineInvariant: function() {
+      if (WEB_ANIMATIONS_TESTING && (this._timeline === null || this._timeline._isInactive())) {
+        console.assert(this._startTime === null || this._currentTime === null);
       }
+    },
+    get startTime() {
+      return this._startTime;
     },
     set startTime(newStartTime) {
       // https://w3c.github.io/web-animations/#setting-the-start-time-of-an-animation
+
+      // Step 1
       var timelineTime = null;
-      if (this._timeline !== null && !this._timeline.isInactive()) {
+      if (this._timeline !== null && !this._timeline._isInactive()) {
         timelineTime = this._timeline.currentTime;
       }
+
+      // Step 2
       if (timelineTime == null && newStartTime !== null) {
         this.holdTime = null;
       }
-      this._assertInvariant();
+      this._assertNoActiveTimelineInvariant();
 
+      // Step 3
       var previousCurrentTime = this._currentTime;
+
+      // Step 4
       this._startTime = newStartTime;
+
+      // Step 5
       if (newStartTime !== null) {
         if (this._playbackRate !== 0) {
           this._holdTime = null;
@@ -246,321 +297,407 @@
         this._holdTime = previousCurrentTime;
       }
 
-      if (this._pendingPlayTask) {
-        this._pendingPlayTask.cancel();
+      // Step 6
+      if (this._pendingPlayTask || this._pendingPauseTask) {
         this._pendingPlayTask = null;
-        this._currentReadyPromise.resolve(this);  Resolve(undefined, this)
-      }
-      if (this._pendingPauseTask) {
-        this._pendingPauseTask.cancel();
         this._pendingPauseTask = null;
         this._currentReadyPromise.resolve(this);
       }
+
+      // Step 7
       this._updateFinishedState(true, false);
     },
-    playAnimation: function(autoRewind) {
+    play: function() {
+      // https://w3c.github.io/web-animations/#dom-animation-play
+      this._playAnimation(true);
+    },
+    _playAnimation: function(autoRewind) {
       // https://w3c.github.io/web-animations/#play-an-animation
+
+      // Step 1
       var abortedPause = this._pendingPauseTask !== null;
+
+      // Step 2
       var hasPendingReadyPromise = false;
+
+      // Step 3
       if (this._playbackRate > 0 && autoRewind) {
         if (this._currentTime === null ||
             this._currentTime < 0 ||
-            this._currentTime >= this._effect.end) {
+            this._currentTime >= this._targetEffectEnd()) {
           this._holdTime = 0;
         }
       } else if (this._playbackRate < 0 && autoRewind) {
         if (this._currentTime === null ||
             this._currentTime <= 0 ||
-            this._currentTime > this._effect.end) {
+            this._currentTime > this._targetEffectEnd()) {
           if (this._effect.end === Infinity) {
             throw new InvalidStateError();
           }
-          this._holdTime = this._effect.end;
+          this._holdTime = this._targetEffectEnd();
         }
       } else if (this._playbackRate === 0 && this._currentTime === null) {
         this.holdTime = 0;
       }
 
-      if (this._pendingPlayTask) {
-        this._pendingPlayTask.cancel();
+      // Step 4
+      if (this._pendingPlayTask || this._pendingPauseTask) {
+        this._pendingPlayTask = null;
+        this._pendingPauseTask = null;
         hasPendingReadyPromise = true;
       }
-      if (this._pendingPauseTask) {
-        this._pendingPauseTask.cancel();
-        hasPendingReadyPromise = true;
-      }
+
+      // Step 5
       if (this._holdTime === null && !abortedPromise) {
         return;
       }
+
+      // Step 6
       if (this._holdTime !== null) {
         this._startTime = null;
       }
+
+      // Step 7
       if (!hasPendingReadyPromise) {
-        this._currentReadyPromise = new Promise(); // new pending promise object
+        this._currentReadyPromise = pendingPromise(this);
       }
 
-      // .......  (skipped for now)
+      // Step 8
+      var self = this;
+      var pendingPlayTask = function() {
+        // Step 1
+        var readyTime = self._timeline.currentTime;
 
+        // Step 2
+        if (self._startTime === null) {
+          var newStartTime = (** ready time **);
+          if (self._playbackRate !== 0) {
+            newStartTime -= self._holdTime / self._playbackRate;
+            self._holdTime = null;
+            self._startTime = newStartTime;
+          }
+        }
 
+        // Step 3
+        self._currentReadyPromise.resolve(self);
+
+        // Step 4
+        self._updateFinishedState(false, false);
+      };
+      setTimeout(pendingPlayTask, 0);
+
+      // Step 9
       this._updateFinishedState(false, false);
     },
     pause: function() {
       // https://w3c.github.io/web-animations/#pause-an-animation
+
+      // Step 1
       if (this._pendingPauseTask !== null) {
         return;
       }
-      if (this._pauseState == PAUSED) {
+
+      // Step 2
+      if (this.playState === 'paused') {
         return;
       }
+
+      // Step 3
       if (this.currentTime === null) {
         if (this._playbackRate >= 0) {
           this._holdTime = 0;
         } else {
-          if (this._target.end === Infinity) {
+          if (this._targetEffectEnd() === Infinity) {
             throw new InvalidStateError();
           } else {
-            this._holdTime = this._target.end;
+            this._holdTime = this._targetEffectEnd();
           }
         }
       }
+
+      // Step 4
       var hasPendingReadyPromise = false;
+
+      // Step 5
       if (this._pendingPlayTask) {
-        this._pendingPlayTask.cancel();
+        this._pendingPlayTask = null;
         hasPendingReadyPromise = true;
       }
+
+      // Step 6
       if (hasPendingReadyPromise === false) {
-        this._currentReadyPromise = new Promise();
+        this._currentReadyPromise = pendingPromise(this);
       }
 
-      // Schedule a task to be executed at the first possible moment
-      // after the user agent has performed any processing necessary to suspend the playback of animation’s target effect, if any.
-      // HOW?  Also, probably need to wrap the below in
-      // function(animation) {}(this) or similar [setting 'this'] to capture animation.
-      this._pendingPauseTask = new function() {
-        this._pendingPauseTask = null;
+      // Step 7
+      var self = this;
+      this._pendingPauseTask = function() {
+        // While this task is running, the animation does not have a pending pause task.
+        self._pendingPauseTask = null;
 
-        var readyTime = this._timeline.currentTime;
-        if (this._startTime !== null && this._holdTime === null) {
-          this._holdTime = readyTime - (this._startTime / this._playbackRate);
+        // Step 1
+        // time value of the timeline associated with animation at the moment when the user agent
+        // completed processing necessary to suspend playback of animation’s target effect.
+        var readyTime = self._timeline.currentTime;
+
+        // Step 2
+        if (self._startTime !== null && self._holdTime === null) {
+          self._holdTime = readyTime - (self._startTime / self._playbackRate);
         }
-        this._startTime = null;
-        this._currentReadyPromise.Resolve(this);
-        this._updateFinishedState(false, false);
-      }
 
+        // Step 3
+        self._startTime = null;
+
+        // Step 4
+        self._currentReadyPromise.resolve(self);
+
+        // Step 5
+        self._updateFinishedState(false, false);
+      };
+      requestAnimationFrame(this._pendingPauseTask);
+
+      // Step 8
       this._updateFinishedState(false, false);
     },
-
-
-
-
-    /**
-
-             attribute DOMString                id;
-             attribute AnimationEffectReadOnly? effect;
-             attribute AnimationTimeline?       timeline;
-             attribute double?                  startTime;
-             attribute double?                  currentTime;
-             attribute double                   playbackRate;
-    readonly attribute AnimationPlayState       playState;
-    readonly attribute Promise<Animation>       ready;
-    readonly attribute Promise<Animation>       finished;
-             attribute EventHandler             onfinish;
-             attribute EventHandler             oncancel;
-    void cancel ();
-    void finish ();
-    void play ();
-    void pause ();
-    void reverse ();
-    **/
-    cancel : function() {
-    },
-    finish : function() {
-    },
-    play : function() {
-    },
-    pause : function() {
-    },
-    reverse : function() {
-    },
-    /**
-    _ensureAlive: function() {
-      // If an animation is playing backwards and is not fill backwards/both
-      // then it should go out of effect when it reaches the start of its
-      // active interval (currentTime == 0).
-      if (this.playbackRate < 0 && this.currentTime === 0) {
-        this._inEffect = this._effect._update(-1);
-      } else {
-        this._inEffect = this._effect._update(this.currentTime);
+    _targetEffectEnd: function() {
+      // https://w3c.github.io/web-animations/#target-effect-end
+      // https://w3c.github.io/web-animations/#end-time
+      if (this._effect === null) {
+        return 0;
       }
-      if (!this._inTimeline && (this._inEffect || !this._finishedFlag)) {
-        this._inTimeline = true;
-        scope.timeline._animations.push(this);
+
+      return this._effect.timing.delay + this._effect.activeDuration + this._effect.timing.endDelay;
+    },
+    _updateFinishedState: function(didSeek, synchronouslyNotify) {
+      // https://w3c.github.io/web-animations/#update-an-animations-finished-state
+
+      // Step 1
+      if (this._startTime !== null &&
+          this._pendingPlayTask === null &&
+          this._pendingPauseTask === null) {
+        if (this._playbackRate > 0 &&
+            this.currentTime !=== null &&
+            this.currentTime >= this._targetEffectEnd) {
+          if (didSeek) {
+            this._holdTime = this.currentTime;
+          } else {
+            if (this._previousCurrentTime === null) {
+              this._holdTime = this._targetEffectEnd;
+            } else {
+              this._holdTime = max(this._previousCurrentTime, this._targetEffectEnd);
+            }
+          }
+        } else if (this._playbackRate < 0 &&
+                   this.currentTime !== null &&
+                   this.currentTime <= 0) {
+          if (didSeek) {
+            this._holdTime = this.currentTime;
+          } else {
+            this._holdTime = 0;
+          }
+        } else if (this.currentTime !== null &&
+                   this._playbackRate !== 0 &&
+                   this._timeline !== null &&
+                   this._timeline._isInactive()) {
+          if (didSeek && this._holdTime !== null) {
+            this._startTime = this._timeline.currentTime - (this._holdTime / this._playbackRate);
+          }
+          this._holdTime = null;
+        }
+
+        // Step 2
+        this._previousCurrentTime = this.currentTime;
+
+        // Step 3
+        var currentFinishedState = false;
+        if (this.playState === 'finished') {
+          currentFinishedState = true;
+        }
+
+        // Step 4
+        if (currentFinishedState &&
+            !this._currentFinishedPromise.IsResolved()) {
+          var self = this;
+          var finishNotificationSteps = function() {
+            if (this._finishNotificationSteps === null) {
+              // finish notification steps have been cancelled.
+              return;
+            }
+
+            // Step 1
+            if (self.playState !== 'finished') {
+              return;
+            }
+
+            // Step 2
+            self._currentFinishedPromise.resolve(self);
+
+            // Step 3
+            // TBD: Queue a task to fire a finish event at animation.
+            // The task source for this task is the DOM manipulation task source.
+            setTimeout(function() {
+
+            }, 0);
+          };
+
+          if (synchronouslyNotify) {
+            this._finishNotificationSteps = null;
+            finishNotificationSteps();
+          } else {
+            if (this._finishNotificationSteps === null) {
+              this._finishNotificationSteps = finishNotificationSteps;
+            }
+            setTimeout(finishNotificationSteps, 0);
+          }
+        }
+
+        // Step 5
+        if (!currentFinishedState &&
+            this._currentFinishedPromise._isResolved {
+          this._currentFinishedPromise = pendingPromise(this);
+        }
       }
     },
-    _tickCurrentTime: function(newTime, ignoreLimit) {
-      if (newTime != this._currentTime) {
-        this._currentTime = newTime;
-        if (this._isFinished && !ignoreLimit)
-          this._currentTime = this._playbackRate > 0 ? this._totalDuration : 0;
-        this._ensureAlive();
+    finish: function() {
+      // https://w3c.github.io/web-animations/#finishing-an-animation-section
+      // https://w3c.github.io/web-animations/#finish-an-animation
+
+      // Step 1
+      if (this._playbackRate === 0 ||
+          (this._playbackRate > 0 && this._targetEffectEnd === Infinity)) {
+        throw new InvalidStateError();
       }
-    },
-    get currentTime() {
-      if (this._idle || this._currentTimePending)
-        return null;
-      return this._currentTime;
-    },
-    set currentTime(newTime) {
-      newTime = +newTime;
-      if (isNaN(newTime))
-        return;
-      scope.restart();
-      if (!this._paused && this._startTime != null) {
-        this._startTime = this._timeline.currentTime - newTime / this._playbackRate;
+
+      // Step 2
+      var limit = 0;
+      if (this._playbackRate > 0) {
+        limit = this._targetEffectEnd;
       }
-      this._currentTimePending = false;
-      if (this._currentTime == newTime)
-        return;
-      this._tickCurrentTime(newTime, true);
-      scope.invalidateEffects();
+
+      // Step 3
+      this._silentlySetCurrentTime(limit);
+
+      // Step 4
+      if (this._startTime === null &&
+          this._timeline !== null &&
+          !this._timeline._isInactive()) {
+        this._startTime = this._timeline.currentTime - (limit / this._playbackRate);
+      }
+
+      // Step 5
+      if (this._pendingPauseTask !== null && this._startTime !== null) {
+        this._holdTime = null;
+        this._pendingPauseTask = null;
+        this._currentReadyPromise.resolve(this);
+      }
+
+      // Step 6
+      if (this._pendingPlayTask && this._startTime !== null) {
+        this._pendingPlayTask = null;
+        this._currentReadyPromise.resolve(this);
+      }
+
+      // Step 7
+      this._updateFinishedState(true, true);
     },
-    get startTime() {
-      return this._startTime;
-    },
-    set startTime(newTime) {
-      newTime = +newTime;
-      if (isNaN(newTime))
-        return;
-      if (this._paused || this._idle)
-        return;
-      this._startTime = newTime;
-      this._tickCurrentTime((this._timeline.currentTime - this._startTime) * this.playbackRate);
-      scope.invalidateEffects();
+    cancel: function() {
+      // https://w3c.github.io/web-animations/#canceling-an-animation-section
+
+      // Step 1
+      if (this.playState !== 'idle') {
+        this._resetPendingTasks();
+        this._currentFinishedPromise.reject(new DOMException('', 'AbortError'));
+        this._currentFinishedPromise = pendingPromise(this);
+        if (this.playState !== 'idle') {
+          // TBD: queue a task to fire a cancel event at animation. The task source for this task is the DOM manipulation task source.
+
+          // The event current time for the dispatched cancel event is unresolved
+          // the event timeline time is the current time value of the timeline associated with animation at the moment the task is queued.
+        }
+      }
+
+      // Step 2
+      this._holdTime = null;
+
+      // Step 3
+      this._startTime = null;
     },
     get playbackRate() {
       return this._playbackRate;
     },
-    set playbackRate(value) {
-      if (value == this._playbackRate) {
-        return;
+    set playbackRate(newPlaybackRate) {
+      // https://w3c.github.io/web-animations/#set-the-animation-playback-rate
+
+      // Step 1
+      var previousTime = this._currentTime;
+
+      // Step 2
+      this._playbackRate = newPlaybackRate;
+
+      // Step 3
+      if (previousTime !== null) {
+        this.currentTime = previousTime;
       }
-      var oldCurrentTime = this.currentTime;
-      this._playbackRate = value;
-      this._startTime = null;
-      if (this.playState != 'paused' && this.playState != 'idle') {
-        this.play();
+    },
+    _silentlySetPlaybackRate : function(newPlaybackRate) {
+      // https://w3c.github.io/web-animations/#silently-set-the-animation-playback-rate
+
+      // Step 1
+      var previousTime = this._currentTime;
+
+      // Step 2
+      this._playbackRate = newPlaybackRate;
+
+      // Step 3
+      if (previousTime !== null) {
+        this._silentlySetCurrentTime(previousTime);
       }
-      if (oldCurrentTime != null) {
-        this.currentTime = oldCurrentTime;
-      }
-    },
-    get _isFinished() {
-      return !this._idle && (this._playbackRate > 0 && this._currentTime >= this._totalDuration ||
-          this._playbackRate < 0 && this._currentTime <= 0);
-    },
-    get _totalDuration() { return this._effect._totalDuration; },
-    get playState() {
-      if (this._idle)
-        return 'idle';
-      if ((this._startTime == null && !this._paused && this.playbackRate != 0) || this._currentTimePending)
-        return 'pending';
-      if (this._paused)
-        return 'paused';
-      if (this._isFinished)
-        return 'finished';
-      return 'running';
-    },
-    play: function() {
-      this._paused = false;
-      if (this._isFinished || this._idle) {
-        this._currentTime = this._playbackRate > 0 ? 0 : this._totalDuration;
-        this._startTime = null;
-      }
-      this._finishedFlag = false;
-      this._idle = false;
-      this._ensureAlive();
-      scope.invalidateEffects();
-    },
-    pause: function() {
-      if (!this._isFinished && !this._paused && !this._idle) {
-        this._currentTimePending = true;
-      }
-      this._startTime = null;
-      this._paused = true;
-    },
-    finish: function() {
-      if (this._idle)
-        return;
-      this.currentTime = this._playbackRate > 0 ? this._totalDuration : 0;
-      this._startTime = this._totalDuration - this.currentTime;
-      this._currentTimePending = false;
-      scope.invalidateEffects();
-    },
-    cancel: function() {
-      if (!this._inEffect)
-        return;
-      this._inEffect = false;
-      this._idle = true;
-      this._finishedFlag = true;
-      this.currentTime = 0;
-      this._startTime = null;
-      this._effect._update(null);
-      // effects are invalid after cancellation as the animation state
-      // needs to un-apply.
-      scope.invalidateEffects();
     },
     reverse: function() {
-      this.playbackRate *= -1;
-      this.play();
-    },
-    addEventListener: function(type, handler) {
-      if (typeof handler == 'function' && type == 'finish')
-        this._finishHandlers.push(handler);
-    },
-    removeEventListener: function(type, handler) {
-      if (type != 'finish')
-        return;
-      var index = this._finishHandlers.indexOf(handler);
-      if (index >= 0)
-        this._finishHandlers.splice(index, 1);
-    },
-    _fireEvents: function(baseTime) {
-      if (this._isFinished) {
-        if (!this._finishedFlag) {
-          var event = new AnimationEvent(this, this._currentTime, baseTime);
-          var handlers = this._finishHandlers.concat(this.onfinish ? [this.onfinish] : []);
-          setTimeout(function() {
-            handlers.forEach(function(handler) {
-              handler.call(event.target, event);
-            });
-          }, 0);
-          this._finishedFlag = true;
-        }
-      } else {
-        this._finishedFlag = false;
-      }
-    },
-    _tick: function(timelineTime, isAnimationFrame) {
-      if (!this._idle && !this._paused) {
-        if (this._startTime == null) {
-          if (isAnimationFrame) {
-            this.startTime = timelineTime - this._currentTime / this.playbackRate;
-          }
-        } else if (!this._isFinished) {
-          this._tickCurrentTime((timelineTime - this._startTime) * this.playbackRate);
-        }
+      // https://w3c.github.io/web-animations/#reversing-an-animation-section
+
+      // Step 1
+      if (this._timeline === null || this._timeline._isInactive()) {
+        throw new InvalidStateError();
       }
 
-      if (isAnimationFrame) {
-        this._currentTimePending = false;
-        this._fireEvents(timelineTime);
+      // Step 2
+      this._silentlySetPlaybackRate(-this._playbackRate);
+
+      // Step 3
+      this._playAnimation(true);
+    },
+    get playState() {
+      // 3.5.19 https://w3c.github.io/web-animations/#play-state
+
+      if (this._pendingPlayTask !== null || this._pendingPauseTask) {
+        WEB_ANIMATIONS_TESTING && console.assert(!this._currentFinishedPromise._isResolved);
+        return 'pending';
       }
+      if (this._currentTime === null) {
+        WEB_ANIMATIONS_TESTING && console.assert(!this._currentFinishedPromise._isResolved);
+        return 'idle';
+      }
+      if (this._startTime === null) {
+        WEB_ANIMATIONS_TESTING && console.assert(!this._currentFinishedPromise._isResolved);
+        return 'paused';
+      }
+      if ((this._playbackRate > 0 && this.currentTime >= this._targetEffectEnd()) ||
+          (this._playbackRate < 0 && this.currentTime <= 0)) {
+        WEB_ANIMATIONS_TESTING && console.assert(this._currentFinishedPromise._isResolved);
+        return 'finished';
+      }
+      WEB_ANIMATIONS_TESTING && console.assert(!this._currentFinishedPromise._isResolved);
+      return 'running';
     },
-    get _needsTick() {
-      return (this.playState in {'pending': 1, 'running': 1}) || !this._finishedFlag;
+    get ready() {
+      // https://w3c.github.io/web-animations/#dom-animation-ready
+      return this._currentReadyPromise._promise;
     },
-    **/
+    get finished() {
+      // https://w3c.github.io/web-animations/#dom-animation-finished
+      return this._currentFinishedPromise._promise;
+    }
   };
 
   if (WEB_ANIMATIONS_TESTING) {
